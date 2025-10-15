@@ -108,6 +108,16 @@ impl LlamaModelParams {
 }
 
 impl LlamaModelParams {
+    pub unsafe fn modify_params(
+        mut self: Pin<&mut Self>,
+        modify: impl FnOnce(&mut llama_cpp_sys_2::llama_model_params),
+    ) -> Pin<&mut Self> {
+        modify(&mut self.params);
+        self
+    }
+}
+
+impl LlamaModelParams {
     /// Get the number of layers to offload to the GPU.
     #[must_use]
     pub fn n_gpu_layers(&self) -> i32 {
