@@ -208,6 +208,7 @@ fn main() {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("Failed to get CARGO_MANIFEST_DIR");
     let llama_src = Path::new(&manifest_dir).join("llama.cpp");
     let build_shared_libs = cfg!(feature = "dynamic-link");
+    let build_dynamic_backends = cfg!(feature = "dynamic-backends");
 
     let build_shared_libs = std::env::var("LLAMA_BUILD_SHARED_LIBS")
         .map(|v| v == "1")
@@ -226,6 +227,7 @@ fn main() {
     debug_log!("TARGET_DIR: {}", target_dir.display());
     debug_log!("OUT_DIR: {}", out_dir.display());
     debug_log!("BUILD_SHARED: {}", build_shared_libs);
+    debug_log!("BUILD_DYNAMIC_BACKENDS: {}", build_dynamic_backends);
 
     // Make sure that changes to the llama.cpp project trigger a rebuild.
     let rebuild_on_children_of = [
@@ -427,36 +429,45 @@ fn main() {
         let out_dir = env::var("OUT_DIR").unwrap();
         let dummy_c = Path::new(&out_dir).join("dummy.c");
         std::fs::write(&dummy_c, "int main() { return 0; }").unwrap();
-        
+
         // Use cc crate to get compiler with proper environment setup
         let mut build = cc::Build::new();
         build.file(&dummy_c);
-        
+
         // Get the actual compiler command cc would use
         let compiler = build.try_get_compiler().unwrap();
-        
+
         // Extract include paths by checking compiler's environment
         // cc crate sets up MSVC environment internally
-        let env_include = compiler.env().iter()
+        let env_include = compiler
+            .env()
+            .iter()
             .find(|(k, _)| k.eq_ignore_ascii_case("INCLUDE"))
             .map(|(_, v)| v);
-            
+
         if let Some(include_paths) = env_include {
-            for include_path in include_paths.to_string_lossy().split(';').filter(|s| !s.is_empty()) {
+            for include_path in include_paths
+                .to_string_lossy()
+                .split(';')
+                .filter(|s| !s.is_empty())
+            {
                 bindings_builder = bindings_builder
                     .clang_arg("-isystem")
                     .clang_arg(include_path);
                 debug_log!("Added MSVC include path: {}", include_path);
             }
         }
-        
+
         // Add MSVC compatibility flags
         bindings_builder = bindings_builder
             .clang_arg(format!("--target={}", target_triple))
             .clang_arg("-fms-compatibility")
             .clang_arg("-fms-extensions");
 
-        debug_log!("Configured bindgen with MSVC toolchain for target: {}", target_triple);
+        debug_log!(
+            "Configured bindgen with MSVC toolchain for target: {}",
+            target_triple
+        );
     }
     let bindings = bindings_builder
         .generate()
@@ -503,6 +514,12 @@ fn main() {
         "BUILD_SHARED_LIBS",
         if build_shared_libs { "ON" } else { "OFF" },
     );
+
+    if build_shared_libs {
+        config.define("GGML_BACKEND_DL", "ON");
+        config.define("GGML_NATIVE", "OFF");
+        config.define("GGML_CPU_ALL_VARIANTS", "ON");
+    }
 
     if matches!(target_os, TargetOs::Apple(_)) {
         config.define("GGML_BLAS", "OFF");
